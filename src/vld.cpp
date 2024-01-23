@@ -22,6 +22,7 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 #include "stdafx.h"
+#include "strsafe.h"
 
 #pragma comment(lib, "dbghelp.lib")
 
@@ -770,6 +771,41 @@ UINT32 VisualLeakDetector::getModuleState(ModuleSet::Iterator& it, UINT32& modul
 static char dbghelp32_assert[sizeof(IMAGEHLP_MODULE64) == 3264 ? 1 : -1]; //10.0.16299, 3256 for previous (v6.11)
 
 
+static void ShowError()
+{
+#if 0
+    // Retrieve the system error message for the last-error code
+
+    LPVOID lpMsgBuf;
+    LPVOID lpDisplayBuf;
+    DWORD dw = GetLastError();
+
+    FormatMessage(
+        FORMAT_MESSAGE_ALLOCATE_BUFFER |
+        FORMAT_MESSAGE_FROM_SYSTEM |
+        FORMAT_MESSAGE_IGNORE_INSERTS,
+        NULL,
+        dw,
+        MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+        (LPTSTR)&lpMsgBuf,
+        0, NULL);
+
+    // Display the error message and exit the process
+
+    lpDisplayBuf = (LPVOID)LocalAlloc(LMEM_ZEROINIT,
+                                      (lstrlen((LPCTSTR)lpMsgBuf) + 40) * sizeof(TCHAR));
+    StringCchPrintf((LPTSTR)lpDisplayBuf,
+                    LocalSize(lpDisplayBuf) / sizeof(TCHAR),
+                    TEXT("Error %d: %s\n"),
+                    dw, lpMsgBuf);
+    OutputDebugString((LPCTSTR)lpDisplayBuf);
+    //MessageBox(NULL, (LPCTSTR)lpDisplayBuf, TEXT("Error"), MB_OK);
+
+    LocalFree(lpMsgBuf);
+    LocalFree(lpDisplayBuf);
+#endif
+}
+
 // attachtoloadedmodules - Attaches VLD to all modules contained in the provided
 //   ModuleSet. Not all modules are in the ModuleSet will actually be included
 //   in leak detection. Only modules that import the global VisualLeakDetector
@@ -791,6 +827,8 @@ VOID VisualLeakDetector::attachToLoadedModules (ModuleSet *newmodules)
 {
     LoaderLock ll;
     CriticalSectionLocker<DbgHelp> locker(g_DbgHelp);
+
+    //MessageBox(0, L"Debug me", L"Debug em", MB_OK);
 
     // Iterate through the supplied set, until all modules have been attached.
     for (ModuleSet::Iterator newit = newmodules->begin(); newit != newmodules->end(); ++newit)
@@ -822,15 +860,24 @@ VOID VisualLeakDetector::attachToLoadedModules (ModuleSet *newmodules)
         IMAGEHLP_MODULE64     moduleimageinfo;
         moduleimageinfo.SizeOfStruct = sizeof(IMAGEHLP_MODULE64);
         BOOL SymbolsLoaded = g_DbgHelp.SymGetModuleInfoW64(g_currentProcess, modulebase, &moduleimageinfo, locker);
+        if (!SymbolsLoaded) {
+            ShowError();
+        }
 
         if (!SymbolsLoaded || moduleimageinfo.BaseOfImage != modulebase)
         {
             DbgTrace(L"dbghelp32.dll %i: SymLoadModuleEx\n", GetCurrentThreadId());
             DWORD64 module = g_DbgHelp.SymLoadModuleExW(g_currentProcess, NULL, modulepath, NULL, modulebase, modulesize, NULL, 0, locker);
+            if (!module) {
+                ShowError();
+            }
             if (module == modulebase)
             {
                 DbgTrace(L"dbghelp32.dll %i: SymGetModuleInfoW64\n", GetCurrentThreadId());
                 SymbolsLoaded = g_DbgHelp.SymGetModuleInfoW64(g_currentProcess, modulebase, &moduleimageinfo, locker);
+                if (!SymbolsLoaded) {
+                    ShowError();
+                }
             }
         }
         if (SymbolsLoaded)
